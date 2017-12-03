@@ -479,7 +479,7 @@ class NCBITaxa(object):
         return tree
 
 
-    def annotate_tree(self, t, taxid_attr="name", tax2name=None, tax2track=None, tax2rank=None):
+    def annotate_tree(self, t, taxid_attr="name", tax2name=None, tax2track=None, tax2rank=None, tolerance=0.0):
         """Annotate a tree containing taxids as leaf names by adding the  'taxid',
         'sci_name', 'lineage', 'named_lineage' and 'rank' additional attributes.
 
@@ -535,7 +535,7 @@ class NCBITaxa(object):
                 n.add_features(sci_name = tax2name.get(node_taxid, getattr(n, taxid_attr, '')),
                                common_name = tax2common_name.get(node_taxid, ''),
                                lineage = tax2track[node_taxid],
-                               rank = tax2rank.get(node_taxid, 'Unknown'),                               
+                               rank = tax2rank.get(node_taxid, 'Unknown'),
                                named_lineage = [tax2name.get(tax, str(tax)) for tax in tax2track[node_taxid]])
             elif n.is_leaf():
                 n.add_features(sci_name = getattr(n, taxid_attr, 'NA'),
@@ -544,30 +544,38 @@ class NCBITaxa(object):
                                rank = 'Unknown',
                                named_lineage = [])
             else:
-                lineage = self._common_lineage([lf.lineage for lf in n2leaves[n]])
-                ancestor = lineage[-1]
+                lineage_support = self._common_lineage([lf.lineage for lf in n2leaves[n] if lf.lineage], tolerance=tolerance)
+                lineage = [x[0] for x in lineage_support]
+                #print (lineage)
+                ancestor, ancestor_support = lineage_support[-1]
                 n.add_features(sci_name = tax2name.get(ancestor, str(ancestor)),
+                               sci_name_support = ancestor_support,
                                common_name = tax2common_name.get(ancestor, ''),
                                taxid = ancestor,
                                lineage = lineage,
+                               lineage_support = lineage_support,
                                rank = tax2rank.get(ancestor, 'Unknown'),
-                               named_lineage = [tax2name.get(tax, str(tax)) for tax in lineage])
+                               named_lineage = [tax2name.get(tax, str(tax)) for tax in lineage],
+                               named_lineage_support = [(tax2name.get(tax, str(tax)),sup) for tax,sup in lineage_support]
+                )
 
         return tax2name, tax2track, tax2rank
 
-    def _common_lineage(self, vectors):
-        occurrence = defaultdict(int)
+    def _common_lineage(self, vectors, tolerance):
+        expected = len(vectors) - (len(vectors)*float(tolerance))
+
+        occurrence = defaultdict(float)
         pos = defaultdict(set)
         for v in vectors:
             for i, taxid in enumerate(v):
                 occurrence[taxid] += 1
                 pos[taxid].add(i)
 
-        common = [taxid for taxid, ocu in six.iteritems(occurrence) if ocu == len(vectors)]
+        common = [(taxid, ocu/len(vectors))  for taxid, ocu in six.iteritems(occurrence) if ocu >= expected]
         if not common:
-            return [""]
+            return [("", 0.0)]
         else:
-            sorted_lineage = sorted(common, key=lambda x: min(pos[x]))
+            sorted_lineage = sorted(common, key=lambda x: min(pos[x[0]]))
             return sorted_lineage
 
         # OLD APPROACH:
